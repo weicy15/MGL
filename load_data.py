@@ -20,6 +20,48 @@ from sklearn.model_selection import train_test_split
 from sklearn.model_selection import KFold
 
 
+
+def data_load(dataset_name, social_data= False, test_dataset= True, bottom=0, cv =None, split=None, user_fre_threshold = None, item_fre_threshold = None):
+    save_dir = "dataset/" + dataset_name
+    if not os.path.exists(save_dir):
+        print("dataset is not exist!!!!")
+        return None
+
+    if os.path.exists(save_dir + '/encoded_user_feature.pkl'):
+        user_feature = pd.read_pickle(save_dir + '/encoded_user_feature.pkl')
+    else:
+        user_feature = None
+
+
+    if os.path.exists(save_dir + '/encoded_item_feature.pkl'):
+        item_feature = pd.read_pickle(save_dir + '/encoded_item_feature.pkl')
+    else:
+        item_feature = None
+
+    social = None
+
+
+    if test_dataset == True:
+        interact_train = pd.read_pickle(save_dir + '/interact_train.pkl')
+        interact_test = pd.read_pickle(save_dir + '/interact_test.pkl')
+        if social_data == True:
+            social = pd.read_pickle(save_dir + '/social.pkl')
+        item_encoder_map = pd.read_csv(save_dir + '/item_encoder_map.csv')
+        item_num = len(item_encoder_map)
+        user_encoder_map = pd.read_csv(save_dir + '/user_encoder_map.csv')
+        user_num = len(user_encoder_map)
+
+        if bottom != None:
+            interact_train = interact_train[interact_train['score'] > bottom]
+            interact_test = interact_test[interact_test['score'] > bottom]
+
+        return interact_train, interact_test, social, user_num, item_num, user_feature, item_feature
+
+
+
+    
+
+
 class Data(object):
     def __init__(self, interact_train, interact_test, social, user_num, item_num, user_feature, item_feature):
         self.interact_train = interact_train
@@ -208,3 +250,37 @@ class Train_dataset(Dataset):
     
 
 
+class Test_dataset_one_plus_all(Dataset):
+    def __init__(self, interact_test):
+        super(Test_dataset_one_plus_all, self).__init__()
+
+        self.interact_test = interact_test
+
+    def __len__(self):
+        return len(self.interact_test)
+
+    def __getitem__(self, idx):
+        entry = self.interact_test.iloc[idx]
+
+        user = entry.userid
+        item = entry.itemid
+
+        return user, item
+
+
+class Test_dataset(Dataset):
+    def __init__(self, testSet_u, item_num):
+        super(Test_dataset, self).__init__()
+
+        self.testSet_u = testSet_u
+        self.user_list = list(testSet_u.keys())
+        self.item_num = item_num
+
+    def __len__(self):
+        return len(self.user_list)
+
+    def __getitem__(self, idx):
+        user = self.user_list[idx]
+        item_list = torch.tensor(list(self.testSet_u[user].keys()))
+        tensor = torch.zeros(self.item_num).scatter(0, item_list, 1)
+        return user, tensor
