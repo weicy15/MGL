@@ -198,6 +198,65 @@ def one_train(Data, opt):
         'sd': model.state_dict(),
         'opt':opt,
     }, 'model.tar')
+
+    # remove the historical interaction in the prediction
+    model = Model(Data, opt, device)
+    model.load_state_dict(best_checkpoint['sd'])
+    model = model.to(device)
+    model.eval()
+    user_historical_mask = Data.user_historical_mask.to(device)
+
+    NDCG = defaultdict(list)
+    RECALL = defaultdict(list)
+    MRR = defaultdict(list)
+
+    head_NDCG = defaultdict(list)
+    head_RECALL = defaultdict(list)
+    tail_NDCG = defaultdict(list)
+    tail_RECALL = defaultdict(list)
+    body_NDCG = defaultdict(list)
+    body_RECALL = defaultdict(list)
+
+    with tqdm(total=len(test_loader), desc="predicting") as pbar:
+        for i, (user_id, pos_item) in enumerate(test_loader):
+            user_id = user_id.to(device)
+            # pos_item (uuu * item_num)
+            # uuu * item_num
+            score = model.predict(user_id)
+            score = torch.mul(user_historical_mask[user_id], score).cpu().detach().numpy()
+            ground_truth = pos_item.detach().numpy()
+
+            for K in opt.K_list:
+                ndcg, recall, mrr = metric.ranking_meansure_testset(score, ground_truth, K, list(Data.testSet_i.keys()))
+                head_ndcg, head_recall, tail_ndcg, tail_recall, body_ndcg, body_recall = metric.ranking_meansure_degree_testset(score, ground_truth, K, Data.itemDegrees, opt.seperate_rate, list(Data.testSet_i.keys()))
+                NDCG[K].append(ndcg)
+                RECALL[K].append(recall)
+                MRR[K].append(mrr)
+            
+                head_NDCG[K].append(head_ndcg)
+                head_RECALL[K].append(head_recall)
+                tail_NDCG[K].append(tail_ndcg)
+                tail_RECALL[K].append(tail_recall)
+                body_NDCG[K].append(body_ndcg)
+                body_RECALL[K].append(body_recall)
+
+            pbar.update(1)
+
+    print(opt)
+    print(model.name)
+    for K in opt.K_list:
+        print("NDCG@{}: {}".format(K, np.mean(NDCG[K])))
+        print("RECALL@{}: {}".format(K, np.mean(RECALL[K])))
+        print("MRR@{}: {}".format(K, np.mean(MRR[K])))
+        print('\r\r')
+        print("head_NDCG@{}: {}".format(K, np.mean(head_NDCG[K])))
+        print("head_RECALL@{}: {}".format(K, np.mean(head_RECALL[K])))
+        print('\r\r')
+        print("tail_NDCG@{}: {}".format(K, np.mean(tail_NDCG[K])))
+        print("tail_RECALL@{}: {}".format(K, np.mean(tail_RECALL[K])))
+        print('\r\r')
+        print("body_NDCG@{}: {}".format(K, np.mean(body_NDCG[K])))
+        print("body_RECALL@{}: {}".format(K, np.mean(body_RECALL[K])))
     
 
 opt = get_config()
