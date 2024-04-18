@@ -175,7 +175,7 @@ def one_train(Data, opt):
                 item1 = item1.to(device)
                 item2 = item2.to(device)
 
-                support_loss = model.i2i(item1, item2) + opt.reg_lambda * model.reg(item1)
+                support_loss = model.i2i(item1, item2)
 
                 weight_for_local_update = list(model.generator.encoder.state_dict().values())
 
@@ -186,7 +186,7 @@ def one_train(Data, opt):
 
                 query_loss = model.q_forward(user_id, pos_item, neg_item, fast_weights)
 
-                loss = query_loss + opt.beta * support_loss
+                loss = query_loss + opt.reg_lambda * model.reg(pos_item)
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -263,7 +263,6 @@ opt = get_config()
 interact_train, interact_test, social, user_num, item_num, user_feature, item_feature = load_data.data_load(opt.dataset_name, social_data=opt.social_data, test_dataset= True, bottom=opt.implcit_bottom)
 Data = load_data.Data(interact_train, interact_test, social, user_num, item_num, user_feature, item_feature)
 one_train(Data, opt)
-
 
 
 

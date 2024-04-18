@@ -214,19 +214,13 @@ class Model(nn.Module):
 
         pos_item_degree = self.item_degree_numpy[pos_item.cpu().numpy()]
         probs = sigmoid(pos_item_degree, self.convergence)
+        m = torch.distributions.binomial.Binomial(1, torch.from_numpy(probs)).sample().to(self.device)
 
-
-        def ssl_compute(normalized_embedded_s1, normalized_embedded_s2, probs):
-            # batch_size
-            pos_score = torch.sum(torch.mul(normalized_embedded_s1, normalized_embedded_s2), dim=1, keepdim=False)
-            # batch_size * batch_size
-            all_score = torch.mm(normalized_embedded_s1, normalized_embedded_s2.t())
-            ssl_mi = (probs * torch.log(torch.exp(pos_score/self.ssl_temp) / torch.exp(all_score/self.ssl_temp).sum(dim=1, keepdim=False))).mean()
-            return ssl_mi
-
-        user_embeddings, item_embeddings = self.compute_embeddings()
-        reg_loss = ssl_compute(pos_item_decoded, item_embeddings[pos_item], probs)
-
+        # batch
+        reg_loss = functional.mse_loss(pos_item_decoded, self.item_id_Embeddings(pos_item), reduction='none').mean(dim=-1, keepdim=False) 
+        if m.sum().item() == 0:
+            return 0 * torch.mul(m, reg_loss).sum()
+        reg_loss = torch.mul(m, reg_loss).sum() / (m.sum())
         return reg_loss
 
 
@@ -339,14 +333,25 @@ class Model(nn.Module):
         return score
 
     def compute_embeddings(self):
-        cur_embedding = torch.cat([self.user_id_Embedding.weight, self.item_id_Embeddings.weight], dim=0)
+        row_index, colomn_index, joint_enhanced_value = self.link_predict(self.itemDegrees, self.top_rate)
+        indice = torch.cat([row_index, colomn_index], dim=0).to(self.device)
+
+        # user_embeddings, item_embeddings = self.compute_embeddings()
+        cur_embedding = torch.cat([self.user_id_Embeddings.weight, self.item_id_Embeddings.weight], dim=0)
+
         all_embeddings = [cur_embedding]
 
+        # item_num
+        enhance_weight = torch.from_numpy(inverse_sigmoid(self.item_degree_numpy, self.convergence))
+        # user_num + item_num
+        enhance_weight = torch.cat([torch.zeros(self.user_num), enhance_weight], dim=-1).to(self.device).float()
+
         for i in range(self.L):
-            
-            cur_embedding = torch.mm(self.joint_adjaceny_matrix_normal, cur_embedding)
+            cur_embedding_ori = torch.mm(self.joint_adjaceny_matrix_normal_spatial, cur_embedding)
+            cur_embedding_enhanced = torch_sparse.spmm(indice, joint_enhanced_value, self.user_num + self.item_num, self.user_num + self.item_num, cur_embedding)
+            cur_embedding = cur_embedding_ori + enhance_weight.unsqueeze(-1) * cur_embedding_enhanced
             all_embeddings.append(cur_embedding)
-        
+
         all_embeddings = torch.stack(all_embeddings, dim=0)
         all_embeddings = torch.mean(all_embeddings, dim=0, keepdim=False)
         user_embeddings, item_embeddings = torch.split(all_embeddings, [self.user_num,self.item_num])
